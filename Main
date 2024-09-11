@@ -1,0 +1,106 @@
+# Step-by-Step Guide: Running PySpark with boto3 on EMR Using a Virtual Environment
+
+## 1. Create a Virtual Environment
+
+First, we'll create a virtual environment with all necessary packages:
+
+```bash
+# Create a new virtual environment
+python3 -m venv pyspark_venv
+
+# Activate the virtual environment
+source pyspark_venv/bin/activate
+
+# Upgrade pip
+pip install --upgrade pip
+
+# Install required packages
+pip install pyarrow pandas matplotlib boto3
+
+# Install venv-pack to create the archive
+pip install venv-pack
+
+# Create the archive
+venv-pack -o pyspark_venv.tar.gz
+
+# Upload the archive to your S3 bucket
+aws s3 cp pyspark_venv.tar.gz s3://your-bucket-name/path/to/pyspark_venv.tar.gz
+```
+
+## 2. Modify spark-env.sh (if necessary)
+
+On the EMR master node, check if `PYSPARK_PYTHON` is set in `/usr/lib/spark/conf/spark-env.sh`:
+
+```bash
+grep PYSPARK_PYTHON /usr/lib/spark/conf/spark-env.sh
+```
+
+If it's set, comment it out:
+
+```bash
+sudo sed -i 's/^export PYSPARK_PYTHON/#export PYSPARK_PYTHON/' /usr/lib/spark/conf/spark-env.sh
+```
+
+## 3. Prepare Your PySpark Script
+
+Ensure your PySpark script (e.g., `generate_data.py`) is uploaded to S3.
+
+## 4. Submit the Spark Job
+
+Use the following `spark-submit` command:
+
+```bash
+spark-submit \
+  --deploy-mode cluster \
+  --conf spark.yarn.appMasterEnv.PYSPARK_PYTHON=./environment/bin/python \
+  --archives s3://your-bucket-name/path/to/pyspark_venv.tar.gz#environment \
+  s3://path/to/your/script/
+```
+
+#Replace `your-bucket-name` and the paths with your actual S3 bucket and file locations.
+
+#Sample script to test
+
+from pyspark.sql import SparkSession
+import boto3
+from botocore.exceptions import ClientError
+import os
+
+def read_s3_file(bucket_name, file_key):
+    """
+    Read a file from S3 using boto3 client
+    """
+    s3 = boto3.client('s3')
+    try:
+        response = s3.get_object(Bucket=bucket_name, Key=file_key)
+        content = response['Body'].read().decode('utf-8')
+        print(f"Successfully read file {file_key} from bucket {bucket_name}")
+        print(f"File content (first 100 characters): {content[:100]}...")
+        return True
+    except ClientError as e:
+        print(f"Error reading file from S3: {e}")
+        return False
+
+def main():
+    # Initialize Spark session
+    spark = SparkSession.builder \
+        .appName("S3 File Reader") \
+        .getOrCreate()
+
+    # S3 bucket and file details
+    bucket_name = "bucket_name"
+    file_key = "s3://full/path/to/your/file/"
+
+    # Read file from S3
+    success = read_s3_file(bucket_name, file_key)
+
+    if success:
+        print("Operation completed successfully")
+    else:
+        print("Operation failed")
+
+    # Stop Spark session
+    spark.stop()
+
+if __name__ == "__main__":
+    main()
